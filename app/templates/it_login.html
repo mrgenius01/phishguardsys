@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>IT Support Login - PhishGuard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .login-box { max-width: 340px; margin: 80px auto; background: #fff; border-radius: 12px; box-shadow: 0 4px 24px rgba(42,58,94,0.13); padding: 32px 28px; }
+        .login-box h2 { text-align: center; color: #2a3a5e; }
+        .login-box label { display: block; margin-top: 16px; color: #2a3a5e; font-weight: 500; }
+        .login-box input { width: 100%; padding: 8px 10px; border-radius: 6px; border: 1px solid #cfd8e3; font-size: 1rem; margin-top: 4px; }
+        .login-box button { width: 100%; background: #4f8cff; color: #fff; border: none; padding: 10px 0; border-radius: 6px; font-size: 1rem; margin-top: 22px; cursor: pointer; }
+        .login-box button:hover { background: #2a6be0; }
+        .login-box .error { color: #c92a2a; margin-top: 10px; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="login-box">
+        <h2>IT Support Login</h2>
+        {% if error %}<div class="error">{{ error }}</div>{% endif %}
+        <form method="post">
+            <label>Username:</label>
+            <input type="text" name="username" required>
+            <label>Password:</label>
+            <input type="password" name="password" required>
+            <button type="submit">Login</button>
+        </form>
+    </div>
+</body>
+</html>

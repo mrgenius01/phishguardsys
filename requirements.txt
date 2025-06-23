@@ -1,0 +1,10 @@
+Flask
+Flask-Cors
+Flask-MySQLdb
+scikit-learn
+pandas
+joblib
+openai
+whois
+language-tool-python
+pyspellchecker

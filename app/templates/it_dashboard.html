@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>IT Support Dashboard - PhishGuard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .dashboard-root { max-width: 1200px; margin: 40px auto; background: #fff; border-radius: 18px; box-shadow: 0 8px 32px rgba(42,58,94,0.13); padding: 32px 40px; }
+        .dashboard-header { display: flex; justify-content: space-between; align-items: center; }
+        .dashboard-header h2 { color: #2a3a5e; }
+        .dashboard-logout { color: #4f8cff; cursor: pointer; font-size: 1.05rem; }
+        .dashboard-logout:hover { text-decoration: underline; }
+        .dashboard-stats { display: flex; gap: 40px; margin: 32px 0; flex-wrap: wrap; }
+        .dashboard-chart { background: #f7f9fc; border-radius: 12px; padding: 18px 24px; box-shadow: 0 2px 8px rgba(42,58,94,0.07); }
+        .dashboard-table { width: 100%; border-collapse: collapse; margin-top: 32px; }
+        .dashboard-table th, .dashboard-table td { padding: 10px 12px; border-bottom: 1px solid #e0e6f1; }
+        .dashboard-table th { background: #eaf1fb; color: #2a3a5e; font-weight: 600; }
+        .dashboard-table tr:hover { background: #e6eaff; }
+        .tag { margin-left: 0; }
+        .analysis-details { font-size: 0.97rem; color: #3a4664; background: #f0f6ff; border-radius: 8px; padding: 10px 14px; margin-top: 6px; }
+        .summary-bar { display: flex; gap: 32px; margin: 18px 0 0 0; }
+        .summary-item { background: #f7f9fc; border-radius: 8px; padding: 12px 24px; color: #2a3a5e; font-weight: 600; font-size: 1.08rem; box-shadow: 0 2px 8px rgba(42,58,94,0.07); }
+        .filter-bar { display: flex; gap: 16px; margin: 18px 0; align-items: center; }
+        .filter-btn { background: #eaf1fb; color: #2a3a5e; border: none; border-radius: 6px; padding: 7px 16px; font-size: 1rem; cursor: pointer; transition: background 0.2s; }
+        .filter-btn.active, .filter-btn:hover { background: #4f8cff; color: #fff; }
+        .search-input { padding: 7px 12px; border-radius: 6px; border: 1px solid #cfd8e3; font-size: 1rem; }
+        .date-input { padding: 7px 12px; border-radius: 6px; border: 1px solid #cfd8e3; font-size: 1rem; }
+        .collapse-toggle { cursor: pointer; color: #4f8cff; font-size: 1.1rem; }
+    </style>
+</head>
+<body>
+    <div class="dashboard-root">
+        <div class="dashboard-header">
+            <h2>IT Support Dashboard</h2>
+            <a href="/it-logout" class="dashboard-logout">Logout</a>
+        </div>
+        <div class="summary-bar" id="summary-bar"></div>
+        <div class="filter-bar">
+            <input class="search-input" id="search-input" placeholder="Search sender, subject, tag...">
+            <button class="filter-btn" data-tag="all">All</button>
+            <button class="filter-btn" data-tag="clean">Clean</button>
+            <button class="filter-btn" data-tag="scam">Potential Scam</button>
+            <button class="filter-btn" data-tag="spam">Spam</button>
+            <button class="filter-btn" data-tag="unknown">Unknown</button>
+            <input class="date-input" type="date" id="date-from"> to <input class="date-input" type="date" id="date-to">
+        </div>
+        <div class="dashboard-stats">
+            <div class="dashboard-chart">
+                <canvas id="labelChart" width="260" height="180"></canvas>
+            </div>
+            <div class="dashboard-chart">
+                <canvas id="domainAgeChart" width="260" height="180"></canvas>
+            </div>
+            <div class="dashboard-chart">
+                <canvas id="topDomainChart" width="260" height="180"></canvas>
+            </div>
+        </div>
+        <h3>Potential Scam Emails</h3>
+        <table class="dashboard-table" id="flagged-table">
+            <thead>
+                <tr>
+                    <th></th>
+                    <th>Sender</th>
+                    <th>Subject</th>
+                    <th>Received</th>
+                    <th>Tag</th>
+                    <th>Details</th>
+                </tr>
+            </thead>
+            <tbody id="flagged-tbody">
+            </tbody>
+        </table>
+    </div>
+    <script>
+    let allFlagged = [];
+    let allStats = {};
+    let currentTag = 'all';
+    let currentSearch = '';
+    let currentFrom = '';
+    let currentTo = '';
+    function getTag(analysis) {
+        if (!analysis || !analysis.prediction) return 'unknown';
+        if (analysis.prediction === 0) return 'clean';
+        if (analysis.prediction === 1 && analysis.features && analysis.features.gpt_score > 0.8) return 'spam';
+        if (analysis.prediction === 1) return 'scam';
+        return 'unknown';
+    }
+    function renderSummaryBar() {
+        const bar = document.getElementById('summary-bar');
+        bar.innerHTML = '';
+        const counts = allStats.label_counts || {};
+        bar.innerHTML = `
+            <div class="summary-item">Total: ${Object.values(counts).reduce((a,b)=>a+b,0)}</div>
+            <div class="summary-item">Clean: ${counts['0']||0}</div>
+            <div class="summary-item">Potential Scam: ${counts['1']||0}</div>
+            <div class="summary-item">Spam: ${counts['spam']||0}</div>
+            <div class="summary-item">Unknown: ${counts['unknown']||0}</div>
+        `;
+    }
+    function renderFlaggedTable() {
+        const tbody = document.getElementById('flagged-tbody');
+        tbody.innerHTML = '';
+        let filtered = allFlagged;
+        if (currentTag !== 'all') filtered = filtered.filter(e => getTag(e.analysis) === currentTag);
+        if (currentSearch) {
+            filtered = filtered.filter(e =>
+                (e.sender && e.sender.toLowerCase().includes(currentSearch)) ||
+                (e.subject && e.subject.toLowerCase().includes(currentSearch)) ||
+                (getTag(e.analysis).includes(currentSearch))
+            );
+        }
+        if (currentFrom) {
+            filtered = filtered.filter(e => new Date(e.received) >= new Date(currentFrom));
+        }
+        if (currentTo) {
+            filtered = filtered.filter(e => new Date(e.received) <= new Date(currentTo));
+        }
+        filtered.forEach((e, i) => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="collapse-toggle" data-i="${i}">▶️</td>
+                <td>${e.sender || ''}</td>
+                <td>${e.subject || ''}</td>
+                <td>${e.received || ''}</td>
+                <td><span class="tag tag-${getTag(e.analysis)}">${getTag(e.analysis).replace(/\b\w/g, l => l.toUpperCase())}</span></td>
+                <td><div class="analysis-details" style="display:none;">${e.analysis ? e.analysis.explanation : ''}<br><pre>${e.analysis ? JSON.stringify(e.analysis.features, null, 2) : ''}</pre></div></td>
+            `;
+            tbody.appendChild(tr);
+        });
+        // Collapse/expand logic
+        document.querySelectorAll('.collapse-toggle').forEach(toggle => {
+            toggle.onclick = function() {
+                const tr = toggle.parentElement;
+                const details = tr.querySelector('.analysis-details');
+                if (details.style.display === 'none') {
+                    details.style.display = 'block';
+                    toggle.textContent = '▼';
+                } else {
+                    details.style.display = 'none';
+                    toggle.textContent = '▶️';
+                }
+            };
+        });
+    }
+    async function loadDashboard() {
+        const flaggedRes = await fetch('/api/flagged-emails');
+        allFlagged = await flaggedRes.json();
+        const statsRes = await fetch('/api/email-stats');
+        allStats = await statsRes.json();
+        renderSummaryBar();
+        renderFlaggedTable();
+        // Charts
+        new Chart(document.getElementById('labelChart').getContext('2d'), {
+            type: 'pie',
+            data: {
+                labels: ['Clean', 'Potential Scam', 'Spam', 'Unknown'],
+                datasets: [{
+                    data: [allStats.label_counts['0']||0, allStats.label_counts['1']||0, allStats.label_counts['spam']||0, allStats.label_counts['unknown']||0],
+                    backgroundColor: ['#e6fbe6','#fff4e6','#ffe6e6','#f0f0f0']
+                }]
+            },
+            options: { plugins: { legend: { position: 'bottom' } } }
+        });
+        new Chart(document.getElementById('domainAgeChart').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: allStats.domain_ages.map(a => a.toFixed(1)),
+                datasets: [{
+                    label: 'Domain Age (years)',
+                    data: allStats.domain_ages,
+                    backgroundColor: '#b6eab6'
+                }]
+            },
+            options: { plugins: { legend: { display: false } } }
+        });
+        new Chart(document.getElementById('topDomainChart').getContext('2d'), {
+            type: 'bar',
+            data: {
+                labels: allStats.top_domains.map(d => d[0]),
+                datasets: [{
+                    label: 'Flagged Domains',
+                    data: allStats.top_domains.map(d => d[1]),
+                    backgroundColor: '#ffd59e'
+                }]
+            },
+            options: { plugins: { legend: { display: false } } }
+        });
+    }
+    // Filter logic
+    document.querySelectorAll('.filter-btn').forEach(btn => {
+        btn.onclick = function() {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            currentTag = btn.getAttribute('data-tag');
+            renderFlaggedTable();
+        };
+    });
+    document.getElementById('search-input').oninput = function(e) {
+        currentSearch = e.target.value.toLowerCase();
+        renderFlaggedTable();
+    };
+    document.getElementById('date-from').onchange = function(e) {
+        currentFrom = e.target.value;
+        renderFlaggedTable();
+    };
+    document.getElementById('date-to').onchange = function(e) {
+        currentTo = e.target.value;
+        renderFlaggedTable();
+    };
+    loadDashboard();
+    </script>
+</body>
+</html>

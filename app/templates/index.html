@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PhishGuard Mail Client</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="mail-root">
+        <aside class="sidebar">
+            <div class="logo">📧</div>
+            <nav>
+                <ul>
+                    <li class="active">Inbox</li>
+                    <li class="disabled">Sent</li>
+                    <li class="disabled">Spam</li>
+                    <li id="settings-link">⚙️ Settings</li>
+                </ul>
+            </nav>
+        </aside>
+        <div class="main-content">
+            <header>
+                <h1>PhishGuard</h1>
+                <span class="subtitle">AI-powered email safety</span>
+            </header>
+            <div class="mail-layout">
+                <section class="inbox-list" id="inbox-list">
+                    <ul id="email-list">
+                        <!-- Email items will be rendered here -->
+                    </ul>
+                </section>
+                <section class="email-view" id="email-view" style="display:none;">
+                    <button id="back-btn">&larr; Inbox</button>
+                    <div class="email-header">
+                        <div class="avatar" id="email-avatar"></div>
+                        <div class="meta">
+                            <div class="sender" id="email-sender"></div>
+                            <div class="received" id="email-time"></div>
+                        </div>
+                    </div>
+                    <h2 id="email-subject"></h2>
+                    <div class="email-body" id="email-body"></div>
+                    <button id="analyze-btn">Analyze Email</button>
+                    <div id="analysis-result" style="display:none;">
+                        <div class="assistant-row">
+                            <div class="assistant-avatar">🤖</div>
+                            <div>
+                                <h3>Assistant Analysis</h3>
+                                <div id="assistant-tip"></div>
+                            </div>
+                        </div>
+                        <pre id="feature-details"></pre>
+                    </div>
+                </section>
+                <section class="settings-view" id="settings-view" style="display:none;">
+                    <h2>Settings</h2>
+                    <form id="settings-form">
+                        <label>Email:</label>
+                        <input type="email" id="config-email" required><br>
+                        <label>IMAP Server:</label>
+                        <input type="text" id="config-imap-server" required><br>
+                        <label>IMAP Port:</label>
+                        <input type="number" id="config-imap-port" value="993" required><br>
+                        <label>Password:</label>
+                        <input type="password" id="config-password" required><br>
+                        <button type="submit">Save Settings</button>
+                    </form>
+                </section>
+            </div>
+            <div id="analysis-modal" class="modal" style="display:none;">
+                <div class="modal-content">
+                    <span class="close" id="close-modal">&times;</span>
+                    <h3>Email Analysis Details</h3>
+                    <div id="modal-analysis-tip"></div>
+                    <pre id="modal-feature-details"></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="/static/app.js"></script>
+</body>
+</html>
