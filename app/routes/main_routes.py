@@ -13,6 +13,8 @@ import email as pyemail
 from functools import wraps
 import hashlib
 import threading
+import time
+import google.api_core.exceptions
 
 main = Blueprint('main', __name__)
 # Load the simple model trained on custom features
@@ -23,6 +25,9 @@ load_dotenv()
 GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
+    model = genai.GenerativeModel("models/gemini-2.5-pro")
+else:
+    model = None
 
 CONFIG_PATH = 'user_config.json'
 IT_REVIEW_FILE = 'it_reviewed_emails.json'
@@ -66,51 +71,81 @@ _domain_age_cache = {}
 def extract_domain_age(email):
     sender = email.get('sender', '')
     domain = ''
+    print(f"[DomainAge] Raw sender: {sender}")
     if sender and '@' in sender:
-        domain = sender.split('@')[-1].strip().lower()
-        # Remove leading/trailing characters like > or spaces
-        domain = domain.lstrip('> ').rstrip(' .')
+        # Extract domain from email address in sender (e.g., 'Name <user@domain.com>')
+        match = re.search(r'<([^>]+)>', sender)
+        if match:
+            email_addr = match.group(1)
+        else:
+            email_addr = sender
+        domain = email_addr.split('@')[-1].strip().lower()
+        domain = re.sub(r'[^a-zA-Z0-9.-]', '', domain)  # Remove any non-domain chars
+        print(f"[DomainAge] Extracted domain from sender: {domain}")
     else:
         match = re.search(r'[\w\.-]+@[\w\.-]+', email.get('body', '') + ' ' + email.get('subject', ''))
         if match:
-            domain = match.group().split('@')[-1].strip().lower().lstrip('> ').rstrip(' .')
+            domain = match.group().split('@')[-1].strip().lower()
+            domain = re.sub(r'[^a-zA-Z0-9.-]', '', domain)
+            print(f"[DomainAge] Extracted domain from body/subject: {domain}")
     if not domain:
+        print("[DomainAge] No domain found, returning -1")
         return -1  # Unknown
     if domain in _domain_age_cache:
+        print(f"[DomainAge] Domain {domain} found in cache: {_domain_age_cache[domain]}")
         return _domain_age_cache[domain]
     try:
-        w = whois.whois(domain)
+        print(f"[DomainAge] Performing whois lookup for: {domain}")
+        import whois as pywhois  # Ensure correct package
+        w = pywhois.whois(domain)
         creation_date = w.creation_date
+        print(f"[DomainAge] Whois creation_date: {creation_date}")
         if isinstance(creation_date, list):
-            # Pick the earliest valid date
             creation_date = min([d for d in creation_date if isinstance(d, datetime.datetime)], default=None)
+            print(f"[DomainAge] Earliest creation_date from list: {creation_date}")
         if isinstance(creation_date, datetime.datetime):
             age = (datetime.datetime.now() - creation_date).days / 365.25
             age = max(age, 0.01)
             _domain_age_cache[domain] = age
+            print(f"[DomainAge] Calculated age for {domain}: {age}")
             return age
-    except Exception:
-        pass
+        else:
+            print(f"[DomainAge] creation_date not a datetime: {creation_date}")
+    except Exception as e:
+        print(f"[DomainAge] Whois lookup failed for {domain}: {e}")
     _domain_age_cache[domain] = -1
+    print(f"[DomainAge] Returning -1 for {domain}")
     return -1  # Unknown
+
+def handle_gemini_rate_limit(e):
+    import re
+    delay = 30  # Default to 30 seconds if not found
+    msg = str(e)
+    match = re.search(r'retry_delay \{\s*seconds: (\d+)', msg)
+    if match:
+        delay = int(match.group(1))
+    print(f"[Gemini] Rate limit hit. Waiting {delay} seconds before retrying...")
+    time.sleep(delay)
 
 def grammar_score(text):
     """
     Use Gemini (Google Generative AI) to rate the grammar quality of the text.
     Returns a float between 0 (poor grammar) and 1 (excellent grammar).
     """
-    if not GEMINI_API_KEY:
+    if not GEMINI_API_KEY or not model:
         return 0.7  # fallback if no key
     prompt = (
         "You are an expert English language assistant. Rate the grammar quality of the following text on a scale from 0 (very poor grammar) to 1 (perfect grammar). Only return a number between 0 and 1.\n\n"
         f"Text:\n{text}\n\nGrammar Score:"
     )
     try:
-        model = genai.GenerativeModel('gemini-pro')
         response = model.generate_content(prompt)
         score_str = response.text.strip().split()[0]
         score = float(score_str)
         return min(max(score, 0.0), 1.0)
+    except google.api_core.exceptions.ResourceExhausted as e:
+        handle_gemini_rate_limit(e)
+        return 0.7
     except Exception as e:
         print(f"Error in grammar_score: {e}")
         return 0.7
@@ -120,18 +155,20 @@ def spelling_score(text):
     Use Gemini (Google Generative AI) to rate the spelling quality of the text.
     Returns a float between 0 (many spelling errors) and 1 (no spelling errors).
     """
-    if not GEMINI_API_KEY:
+    if not GEMINI_API_KEY or not model:
         return 0.7  # fallback if no key
     prompt = (
         "You are an expert English language assistant. Rate the spelling quality of the following text on a scale from 0 (many spelling errors) to 1 (no spelling errors). Only return a number between 0 and 1.\n\n"
         f"Text:\n{text}\n\nSpelling Score:"
     )
     try:
-        model = genai.GenerativeModel('gemini-pro')
         response = model.generate_content(prompt)
         score_str = response.text.strip().split()[0]
         score = float(score_str)
         return min(max(score, 0.0), 1.0)
+    except google.api_core.exceptions.ResourceExhausted as e:
+        handle_gemini_rate_limit(e)
+        return 0.7
     except Exception as e:
         print(f"Error in spelling_score: {e}")
         return 0.7
@@ -149,7 +186,7 @@ def gpt_score(text):
     Use Gemini (Google Generative AI) to rate the likelihood of the email being spam/phishing.
     Returns a float between 0 (not spam) and 1 (very likely spam).
     """
-    if not GEMINI_API_KEY:
+    if not GEMINI_API_KEY or not model:
         return 0.7  # fallback if no key
     prompt = (
         "You are an email security assistant. Rate the following email on a scale from 0 (not spam) to 1 (very likely spam/phishing). "
@@ -157,13 +194,15 @@ def gpt_score(text):
         f"Email:\n{text}\n\nSpam Score:"
     )
     try:
-        model = genai.GenerativeModel('gemini-pro')
         response = model.generate_content(prompt)
         score_str = response.text.strip().split()[0]
         score = float(score_str)
         return min(max(score, 0.0), 1.0)
+    except google.api_core.exceptions.ResourceExhausted as e:
+        handle_gemini_rate_limit(e)
+        return 0.7
     except Exception as e:
-        print(f"Error {e}")
+        print(f"Error in gpt_score: {e}")
         return 0.7
 
 def generate_explanation(features, prediction):
@@ -349,9 +388,18 @@ def user_gpt_explain():
         "\nFriendly explanation:"
     )
     try:
-        model = genai.GenerativeModel('gemini-pro')
+        if not GEMINI_API_KEY or not model:
+            return jsonify({'friendly_explanation': 'Could not generate explanation.'}), 500
         response = model.generate_content(prompt)
         friendly = response.text.strip()
         return jsonify({'friendly_explanation': friendly})
+    except google.api_core.exceptions.ResourceExhausted as e:
+        handle_gemini_rate_limit(e)
+        return jsonify({'friendly_explanation': 'Gemini API quota exceeded. Please try again later.'}), 429
     except Exception as e:
         return jsonify({'friendly_explanation': 'Could not generate explanation.'}), 500
+
+def clear_domain_age_cache():
+    global _domain_age_cache
+    _domain_age_cache = {}
+    print("[DomainAge] Cache cleared.")
