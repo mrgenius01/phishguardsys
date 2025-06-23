@@ -70,8 +70,6 @@ user_config.json
 it_reviewed_emails.json
 
 # Model/data files
-*.pkl
-*.csv
 *.log
 
 # Flask session
