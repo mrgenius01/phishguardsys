@@ -6,5 +6,4 @@ pandas
 joblib
 openai
 whois
-language-tool-python
-pyspellchecker
+# Removed: pyspellchecker (SpellChecker) and language_tool_python (grammar check) as both are now handled by Gemini LLM

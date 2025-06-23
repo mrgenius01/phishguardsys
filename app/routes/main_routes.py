@@ -4,8 +4,6 @@ import numpy as np
 import whois
 import re
 import datetime
-import language_tool_python
-from spellchecker import SpellChecker
 import os
 from dotenv import load_dotenv
 import google.generativeai as genai
@@ -97,28 +95,45 @@ def extract_domain_age(email):
     return -1  # Unknown
 
 def grammar_score(text):
+    """
+    Use Gemini (Google Generative AI) to rate the grammar quality of the text.
+    Returns a float between 0 (poor grammar) and 1 (excellent grammar).
+    """
+    if not GEMINI_API_KEY:
+        return 0.7  # fallback if no key
+    prompt = (
+        "You are an expert English language assistant. Rate the grammar quality of the following text on a scale from 0 (very poor grammar) to 1 (perfect grammar). Only return a number between 0 and 1.\n\n"
+        f"Text:\n{text}\n\nGrammar Score:"
+    )
     try:
-        tool = language_tool_python.LanguageTool('en-US')
-        matches = tool.check(text)
-        errors = len(matches)
-        words = len(text.split())
-        if words == 0:
-            return 1.0
-        score = max(0.0, 1.0 - errors / words)
-        return round(score, 2)
-    except Exception:
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content(prompt)
+        score_str = response.text.strip().split()[0]
+        score = float(score_str)
+        return min(max(score, 0.0), 1.0)
+    except Exception as e:
+        print(f"Error in grammar_score: {e}")
         return 0.7
 
 def spelling_score(text):
+    """
+    Use Gemini (Google Generative AI) to rate the spelling quality of the text.
+    Returns a float between 0 (many spelling errors) and 1 (no spelling errors).
+    """
+    if not GEMINI_API_KEY:
+        return 0.7  # fallback if no key
+    prompt = (
+        "You are an expert English language assistant. Rate the spelling quality of the following text on a scale from 0 (many spelling errors) to 1 (no spelling errors). Only return a number between 0 and 1.\n\n"
+        f"Text:\n{text}\n\nSpelling Score:"
+    )
     try:
-        spell = SpellChecker()
-        words = text.split()
-        misspelled = spell.unknown(words)
-        if not words:
-            return 1.0
-        score = max(0.0, 1.0 - len(misspelled) / len(words))
-        return round(score, 2)
-    except Exception:
+        model = genai.GenerativeModel('gemini-pro')
+        response = model.generate_content(prompt)
+        score_str = response.text.strip().split()[0]
+        score = float(score_str)
+        return min(max(score, 0.0), 1.0)
+    except Exception as e:
+        print(f"Error in spelling_score: {e}")
         return 0.7
 
 def link_score(text):
